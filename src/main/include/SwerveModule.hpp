@@ -5,14 +5,6 @@
 
 #include <ctre/Phoenix.h>
 
-using can_adr = int;
-
-struct SwerveModuleInfo
-{
-    can_adr const driver_adr, turner_adr, cancoder_adr;
-    frc::Translation2d wheel_pos;
-};
-
 class SwerveModule
 {
 public:
