@@ -87,49 +87,48 @@ Turret::visionState Turret::visionTrack(Turret::POSITION const &initPosition, do
     if (camera.hasTarget())
     {
         // auto const target = result.GetBestTarget();
-        auto const [robot_x_speed, robot_y_speed, robot_omega_speed] = Trajectory::getEstimatedSpeeds();
+        auto const robot_speeds = Trajectory::getEstimatedSpeeds();
 
-        auto offset_deg = units::degree_t{camera.getX()} + CAMERA_X_OFFSET;
+        auto const camera_deg = units::degree_t{camera.getX()} + CAMERA_X_OFFSET;
 
         double const turret_pos_ticks = turretTurnyTurny.encoder.GetPosition();
 
-        if (robot_x_speed > 1_mps || robot_y_speed > 1_mps)
+        auto target_ticks = turret_pos_ticks + (camera_deg.value() * TICKS_PER_DEGREE);
+
+        if (robot_speeds.vx > 0.3_mps || robot_speeds.vy > 0.3_mps)
         {
+            // std::complex uses radians
+            units::radian_t const target_rad{target_ticks / TICKS_PER_RADIAN};
 
-            units::degree_t const turret_pos_deg{turret_pos_ticks / TICKS_PER_DEGREE};
+            // y_speed reversed so left=negative and right=positive
+            auto const robot_leftright_speed = -robot_speeds.vy;
 
-            units::degree_t const target_deg = offset_deg + turret_pos_deg;
+            // Logic is copied from ChassisSpeeds::FromFieldRelativeSeeds
+            auto const target_rel_leftright_speed = -robot_speeds.vx * sin(target_rad.value()) + robot_leftright_speed * cos(target_rad.value());
 
-            auto const target_relative_speeds =
-                frc::ChassisSpeeds::FromFieldRelativeSpeeds(robot_x_speed, robot_y_speed, robot_omega_speed,
-                                                            target_deg);
+            // Uses atan2 to prevent divide by 0 warnings
+            auto const robot_speed_argument = target_rad.value() - atan2(target_rel_leftright_speed.value(), 0);
+            auto const robot_speed_magnitude = std::abs(target_rel_leftright_speed.value());
 
-            auto const target_relative_y_speed = target_relative_speeds.vy.value();
-            units::radian_t const offset_rad = offset_deg;
-            auto const target_relative_angle = offset_rad.value() - atan2(target_relative_y_speed, 0);
-            
-            std::complex<double> const target_relative_robot_speed =
-                std::polar(target_relative_y_speed, 
-               target_relative_angle);
+            std::complex<double> const robot_movement_vector = std::polar(robot_speed_magnitude, robot_speed_argument);
 
-            // Speed of shooter wheel is 53.46 m/s
-            auto shoot_speed = std::polar(53.46 / 2, offset_rad.value());
+            // Speed of shooter wheel is ~20m/s
+            auto const shoot_vector = std::polar(20.0, target_rad.value());
 
-            auto const ball_speed = shoot_speed - target_relative_robot_speed;
+            auto const ball_vector = shoot_vector - robot_movement_vector;
 
-            offset_deg = units::radian_t{std::arg(ball_speed)};
+            // std::arg returns angle in radians
+            target_ticks = std::arg(ball_vector) * TICKS_PER_RADIAN;
         }
 
-        double const target_ticks = turret_pos_ticks + (offset_deg.value() * TICKS_PER_DEGREE);
-
         static auto prev_offset_deg = 0_deg;
-        if (prev_offset_deg == offset_deg) // prevents reusing outdated data
-            return {true, std::abs(offset_deg.value()) < tolerance};
-        prev_offset_deg = offset_deg;
+        if (prev_offset_deg == camera_deg) // Prevents reusing outdated camera data
+            return {true, std::abs(camera_deg.value()) < tolerance};
+        prev_offset_deg = camera_deg;
 
         turretTurnyTurny.SetTarget(target_ticks);
 
-        return {true, std::abs(offset_deg.value()) < tolerance};
+        return {true, std::abs(camera_deg.value()) < tolerance};
     }
 
     return {false, false};
